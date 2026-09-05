@@ -9,6 +9,7 @@ By the end of this lab you'll be able to:
 - Call the Bedrock Runtime API directly — outside the console Playground — using Bruno
 - Explain the difference between authenticating with an IAM role attached to an instance vs. a long-term Bedrock API key
 - Force that API traffic over AWS PrivateLink instead of the public internet, and prove it's actually happening
+- Explain the difference between a network path that happens to be private and credentials that are actually, enforceably restricted to that path — and how to build the latter with an IAM condition key
 
 As with Lab 01: don't rush to exact click paths. This lab hands you the pieces and tells you what to look for — working out precisely where to click is part of the exercise. A few steps (the private endpoint section especially) are more heavily guided, since that's genuinely advanced material.
 
@@ -272,6 +273,60 @@ Private DNS only controls what IP address a hostname *resolves to*. It doesn't, 
 
 ---
 
+## Part 8 — Making It *Actually* Private
+
+Part 7 ended on a deliberately unsatisfying note: you forced your lab instance's own traffic over PrivateLink, but the credentials themselves — that Bedrock API key, or the role's temporary creds — would still work perfectly well if used from anywhere else on the internet. Locking down *your instance's network path* is not the same thing as locking down *the model*. So: how do you actually close that gap, so those specific credentials stop working the moment they leave your VPC — even if they leak, even if someone copies them onto their own laptop?
+
+The mechanism is an IAM condition key called **`aws:SourceVpce`**. AWS automatically attaches this to the request context of any API call that arrives through a VPC endpoint — and it's simply *absent* for anything that doesn't. That means you can write an explicit `Deny` statement on the identity making the call that says, in effect, "block this unless the request came in through this exact endpoint." Since that condition only ever gets populated for endpoint traffic, there's no way to satisfy it from outside your VPC — not with a copy of the credentials, not from a different account, not from anywhere.
+
+1. Grab your VPC endpoint's ID (it starts with `vpce-`) from its detail page in the VPC console.
+2. In IAM, find the identity behind whichever auth method you're actively testing with — the role from Method A, or (remember, from Part 6, that a long-term Bedrock API key is backed by an IAM user under the hood) that user, if you went with Method B.
+3. Attach an inline policy to it with a statement like this (swap in your real endpoint ID):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "DenyBedrockUnlessViaMyEndpoint",
+         "Effect": "Deny",
+         "Action": [
+           "bedrock:InvokeModel",
+           "bedrock:InvokeModelWithResponseStream",
+           "bedrock:Converse",
+           "bedrock:ConverseStream"
+         ],
+         "Resource": "*",
+         "Condition": {
+           "StringNotEquals": {
+             "aws:SourceVpce": "vpce-xxxxxxxxxxxxxxxxx"
+           }
+         }
+       }
+     ]
+   }
+   ```
+
+   Notice the `Resource` here is `*`, not scoped down to Nova Pro specifically — deliberately, since a Deny like this is meant to be a blanket network guardrail, not a fine-grained permission. You don't want a gap where some other model ARN quietly slips through ungoverned.
+
+4. Retest from your own laptop, outside the VPC — the exact same request and credentials that worked back in Part 7. It should now fail with an access-denied-style error.
+5. Retest from the lab instance. It should still succeed — that traffic carries the matching `aws:SourceVpce` context, so the Deny's condition doesn't trigger.
+
+If something goes sideways, this policy is easy to back out of — it's an inline policy on one identity, not a change to the console session you're working in, so removing it undoes exactly this.
+
+### Reflect
+
+<details>
+<summary><strong>What's genuinely different about this vs. what Part 7 did?</strong></summary>
+
+Part 7 controlled *your instance's* side of the network path — it changed how traffic leaving that specific box gets to Bedrock, but it never touched whether the credentials themselves would work from somewhere else entirely. This Deny statement controls the credential at the authorization layer, regardless of whose infrastructure is making the call. That's the actual difference between "my traffic happens to take a certain route" and "these specific credentials are only valid when arriving via one particular path" — and it's the real answer to "how do I stop a leaked key from being usable to reach this model over the internet."
+
+One honest caveat, though: this only restricts the identity you attached it to. It doesn't make Bedrock's public endpoint vanish for the rest of the world — other AWS accounts, and any of *your* other credentials you didn't lock down this way, can still reach it exactly as before. What you've actually achieved is narrower and more useful than "made a model private" sounds: you've made a *specific set of credentials* incapable of reaching Bedrock from anywhere except your own private network path. For defending against a leaked key or a misused role, that's precisely the guarantee that matters.
+
+</details>
+
+---
+
 ## Wrap-Up
 
 Before moving on, make sure you can answer these:
@@ -282,5 +337,6 @@ Before moving on, make sure you can answer these:
 4. What's genuinely different between a long-term Bedrock API key and IAM role credentials fetched from IMDS — not just "how you use them in Bruno," but what each one actually *is*?
 5. Why did calling Nova Pro by its plain Model ID fail, and what did you have to use instead? Why do you think Bedrock enforces this for some models and not others?
 6. What two things had to both be true before your Bedrock traffic was genuinely private, not just "happens to resolve to a private IP"?
+7. After Part 8, if someone stole the exact credentials you were using and tried them from their own laptop, what would happen — and what would happen if they instead got access to a machine inside your VPC? What does that tell you about what `aws:SourceVpce` actually protects against?
 
-Ping your onboarding buddy or the team channel if any of this didn't click — this lab covers real production patterns (private endpoints, least-privilege IAM, role vs. key tradeoffs), not just Bedrock trivia.
+Ping your onboarding buddy or the team channel if any of this didn't click — this lab covers real production patterns (private endpoints, least-privilege IAM, role vs. key tradeoffs, and closing the gap between "private-ish" and actually enforced), not just Bedrock trivia.
