@@ -7,7 +7,7 @@ By the end of this lab you'll be able to:
 - Stand up lab infrastructure from a CloudFormation template through the AWS console
 - Connect to a Windows EC2 instance over RDP
 - Call the Bedrock Runtime API directly — outside the console Playground — using Bruno
-- Explain the difference between authenticating with an IAM role attached to an instance vs. long-term IAM user access keys
+- Explain the difference between authenticating with an IAM role attached to an instance vs. a long-term Bedrock API key
 - Force that API traffic over AWS PrivateLink instead of the public internet, and prove it's actually happening
 
 As with Lab 01: don't rush to exact click paths. This lab hands you the pieces and tells you what to look for — working out precisely where to click is part of the exercise. A few steps (the private endpoint section especially) are more heavily guided, since that's genuinely advanced material.
@@ -125,9 +125,9 @@ Don't send it yet — if you try right now, it'll fail. You haven't set up authe
 
 ## Part 6 — Authenticating the Call
 
-Every Bedrock Runtime request needs to be signed using AWS credentials (AWS "SigV4" signing) — Bruno has a built-in auth type for exactly this, look for it under the request's **Auth** tab.
+Every Bedrock Runtime request needs valid AWS credentials attached to it somehow — Bruno's request **Auth** tab has more than one auth type that can do this, and which one you pick depends on which method below you're using.
 
-There are two different ways to get valid AWS credentials into that auth tab. **Try both**, so you understand how each one actually works — but for the rest of this lab (and going forward, day to day), you'll default to the long-term key approach for simplicity in Bruno/Postman-style tools.
+There are two different ways to authenticate this call. **Try both**, so you understand how each one actually works — but for the rest of this lab (and day to day, for quick manual API testing), you'll default to the long-term Bedrock API key approach for simplicity.
 
 ### Method A — IAM role attached to the instance
 
@@ -136,6 +136,7 @@ This is the pattern AWS generally recommends: rather than an engineer holding on
 1. In IAM, create a role trusted by the EC2 service, with a policy that allows `bedrock:InvokeModel` (and `bedrock:InvokeModelWithResponseStream`) — scope the `Resource` down to just the Nova Pro model's ARN rather than `*`, as good practice.
 2. Attach that role to your running instance (EC2 console → your instance → change its IAM role).
 3. Here's the catch: unlike the AWS CLI or an AWS SDK, Bruno has no built-in awareness of "this box has an IAM role" — it won't fetch role credentials for you automatically. You have to go get them yourself, from the **Instance Metadata Service (IMDS)**, and paste them into Bruno's auth fields by hand.
+4. In Bruno, this is the one case where you want the **AWS Sig V4** auth type — role credentials are a classic Access Key ID / Secret Access Key / Session Token triple, and Bruno needs to sign the request with them the same way the AWS CLI would.
 
 <details>
 <summary><strong>Need the IMDS commands? Click here</strong></summary>
@@ -152,13 +153,39 @@ The last command returns JSON with `AccessKeyId`, `SecretAccessKey`, and `Token`
 
 </details>
 
-### Method B — Long-term IAM user access keys (the default for this lab)
+### Method B — A Bedrock API key (the default for this lab)
 
-1. In IAM, create a user (again, Cisco-username-based naming) with a policy scoped to `bedrock:InvokeModel` on Nova Pro, same as above.
-2. Generate an access key for that user (IAM → your user → Security credentials → Create access key). Like the EC2 key pair, the secret is shown to you **once** — copy both the Access Key ID and Secret Access Key immediately.
-3. Paste those directly into Bruno's AWS auth fields (no session token needed this time — these don't expire the way role-vested credentials do).
+Bedrock has its own dedicated, built-in API key feature — this is a distinct mechanism from a generic IAM user access key, and it's worth not conflating the two. It's purpose-built for exactly what you're doing right now: quickly authenticating a manual API call without setting up IAM users, policies, or SigV4 signing yourself.
 
-Now send your request from Part 5. You should get a real response back from Nova Pro.
+1. In the **Bedrock console** (not IAM), find **API keys** in the left navigation.
+2. Switch to the **Long-term API keys** tab and generate one — you'll pick an expiration date for it (it's "long-term" relative to the other option below, not indefinite). By default it comes with enough permissions to call Bedrock; you don't need to attach a policy yourself.
+3. The key is shown to you **once** — copy it immediately, same as everything else in this lab.
+4. In Bruno, this one is simpler than Method A: switch the Auth type to **Bearer Token** and paste the key in directly. That's it — no Access Key ID, no Secret Access Key, no signing. Under the hood this still creates an IAM user and something AWS calls a "service-specific credential," but you never have to touch that directly the way you did in Method A.
+
+Now send your request from Part 5 using this auth method. You should get a real response back from Nova Pro... probably. Keep reading before you panic if you don't.
+
+> **Bonus, not required for this lab:** there's also a **short-term** Bedrock API key option on that same page — it inherits whatever permissions your current console session already has, and expires within 12 hours. It's the option AWS actually recommends once you're past "just exploring" and building something real. Worth knowing it exists, since the "long-term key, forever, why would I rotate it" habit is exactly the kind of thing that gets flagged in a real security review.
+
+### If Nova Pro pushes back
+
+If you built your request URL using Nova Pro's plain Model ID (the one you recorded in Lab 01), don't be surprised if what comes back isn't a completion at all, but something like this:
+
+```json
+{
+  "message": "Invocation of model ID amazon.nova-pro-v1:0 with on-demand throughput isn’t supported. Retry your request with the ID or ARN of an inference profile that contains this model."
+}
+```
+
+Before you assume you botched the request or the auth — you didn't. This is Bedrock telling you something specific and real: some models (Nova Pro among them) can't be invoked on-demand by their plain model ID at all. They can only be invoked through an **inference profile** — a Bedrock construct that (among other things) can route your request across multiple regions for capacity. Bedrock won't guess which profile you mean, so it makes you say so explicitly.
+
+Head into the Bedrock console and look for **Cross-Region inference** in the left navigation. Find the profile that includes Nova Pro, and note its ID (or ARN). Then swap that value into your request URL in place of the plain model ID you were using before, and resend.
+
+<details>
+<summary><strong>Not finding it / want a sanity check on the format?</strong></summary>
+
+Inference profile IDs generally follow a `<region-group>.<original-model-id>` pattern — for example `us.amazon.nova-pro-v1:0` for the US region group. The exact prefix depends on which region group covers where you deployed, so confirm the real value against what the console actually shows you rather than assuming the `us.` prefix is universal.
+
+</details>
 
 ### Reflect
 
@@ -169,7 +196,7 @@ You've now authenticated the same API call two different ways. Before moving on,
 
 **Role-based credentials are temporary and tied to the instance's lifecycle.** There's no long-lived secret sitting around to leak — if the credentials are ever exposed, they expire on their own (often within hours), and nobody had to type or store a permanent secret anywhere. This is why AWS (and most security teams) push hard for roles wherever the *tooling* supports it: the AWS CLI, SDKs, and most infrastructure code all know how to fetch and refresh role credentials from IMDS transparently.
 
-**Long-term access keys are simple but static.** They work anywhere, including tools like Bruno/Postman that have no concept of "ask the instance for temporary creds" — you just paste in a value and it works, full stop, no expiration to worry about mid-request. The tradeoff is that a leaked long-term key stays valid until someone manually revokes it, and it's on you to store and rotate it responsibly. That's exactly why this lab defaults to long-term keys: it's the practical choice for a manual API-testing tool, not a security recommendation to carry into production service-to-service code, where you'd reach for a role every time the tooling allows it.
+**A long-term Bedrock API key is simple but comparatively static.** It works anywhere, including tools like Bruno/Postman that have no concept of "ask the instance for temporary creds" — you just paste in a value and it works, no signing, no expiration to worry about mid-request. The tradeoff is that a leaked long-term key stays valid until it either expires (on whatever schedule you picked when you generated it) or someone manually revokes it. That's exactly why this lab defaults to it: it's the practical choice for a manual API-testing tool, not a security recommendation to carry into production service-to-service code — AWS's own documentation for this feature says as much, explicitly recommending short-term keys once you're building something real rather than just exploring.
 
 </details>
 
@@ -230,6 +257,8 @@ Before moving on, make sure you can answer these:
 1. Why did the lab have you name everything after your Cisco username instead of something generic?
 2. What's the difference between the Bedrock control-plane endpoint and the Bedrock **Runtime** endpoint?
 3. Walk through, in your own words, how an EC2 instance role actually gets Bruno a usable set of credentials — what's happening under the hood that the AWS CLI would normally do for you automatically?
-4. What two things had to both be true before your Bedrock traffic was genuinely private, not just "happens to resolve to a private IP"?
+4. What's genuinely different between a long-term Bedrock API key and IAM role credentials fetched from IMDS — not just "how you use them in Bruno," but what each one actually *is*?
+5. Why did calling Nova Pro by its plain Model ID fail, and what did you have to use instead? Why do you think Bedrock enforces this for some models and not others?
+6. What two things had to both be true before your Bedrock traffic was genuinely private, not just "happens to resolve to a private IP"?
 
 Ping your onboarding buddy or the team channel if any of this didn't click — this lab covers real production patterns (private endpoints, least-privilege IAM, role vs. key tradeoffs), not just Bedrock trivia.
