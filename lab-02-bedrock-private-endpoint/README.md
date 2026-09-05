@@ -134,7 +134,7 @@ There are two different ways to authenticate this call. **Try both**, so you und
 
 This is the pattern AWS generally recommends: rather than an engineer holding onto static credentials, the *instance itself* is granted permissions, and anything running on it can request temporary credentials on demand.
 
-1. In IAM, create a role trusted by the EC2 service, with a policy that allows `bedrock:InvokeModel` (and `bedrock:InvokeModelWithResponseStream`) — scope the `Resource` down to just the Nova Pro model's ARN rather than `*`, as good practice.
+1. In IAM, create a role trusted by the EC2 service, with a policy that allows `bedrock:InvokeModel` (and `bedrock:InvokeModelWithResponseStream`). **Scope the `Resource` down rather than leaving it as `*`** — but if you're calling Nova Pro through the inference profile from Part 5, there's a wrinkle: see the callout right after Method B before you write this policy, since scoping it to just the plain model ARN won't be enough.
 2. Attach that role to your running instance (EC2 console → your instance → change its IAM role).
 3. Here's the catch: unlike the AWS CLI or an AWS SDK, Bruno has no built-in awareness of "this box has an IAM role" — it won't fetch role credentials for you automatically. You have to go get them yourself, from the **Instance Metadata Service (IMDS)**, and paste them into Bruno's auth fields by hand.
 4. In Bruno, this is the one case where you want the **AWS Sig V4** auth type — role credentials are a classic Access Key ID / Secret Access Key / Session Token triple, and Bruno needs to sign the request with them the same way the AWS CLI would.
@@ -159,7 +159,7 @@ The last command returns JSON with `AccessKeyId`, `SecretAccessKey`, and `Token`
 Bedrock has its own dedicated, built-in API key feature — this is a distinct mechanism from a generic IAM user access key, and it's worth not conflating the two. It's purpose-built for exactly what you're doing right now: quickly authenticating a manual API call without setting up IAM users, policies, or SigV4 signing yourself.
 
 1. In the **Bedrock console** (not IAM), find **API keys** in the left navigation.
-2. Switch to the **Long-term API keys** tab and generate one — you'll pick an expiration date for it (it's "long-term" relative to the other option below, not indefinite). By default it comes with enough permissions to call Bedrock; you don't need to attach a policy yourself.
+2. Switch to the **Long-term API keys** tab and generate one — you'll pick an expiration date for it (it's "long-term" relative to the other option below, not indefinite). By default it comes with a managed policy attached that covers general Bedrock access, so you don't need to write a policy yourself just to get started — though stick around for the callout further down; inference profiles specifically add a wrinkle even here.
 3. The key is shown to you **once** — copy it immediately, same as everything else in this lab.
 4. In Bruno, this one is simpler than Method A: switch the Auth type to **Bearer Token** and paste the key in directly. That's it — no Access Key ID, no Secret Access Key, no signing. Under the hood this still creates an IAM user and something AWS calls a "service-specific credential," but you never have to touch that directly the way you did in Method A.
 
@@ -187,6 +187,43 @@ Head into the Bedrock console and look for **Inference profiles** in the left na
 Inference profile IDs generally follow a `<region-group>.<original-model-id>` pattern — for example `us.amazon.nova-pro-v1:0` for the US region group (this one specifically routes across `us-east-1`, `us-east-2`, and `us-west-2`). The exact prefix depends on which region group covers where you deployed, so confirm the real value against what the console actually shows you rather than assuming the `us.` prefix is universal.
 
 </details>
+
+### One more wrinkle: permissions on the inference profile itself
+
+Fixed the URL and still getting denied? You might hit an error like this next:
+
+```json
+{
+  "Message": "User: arn:aws:iam::<account-id>:user/<your-user> is not authorized to perform: bedrock:InvokeModel on resource: arn:aws:bedrock:<region>:<account-id>:inference-profile/us.amazon.nova-pro-v1:0 because no identity-based policy allows the bedrock:InvokeModel action"
+}
+```
+
+That specific phrasing — *"because no identity-based policy allows..."* — is IAM's wording for a plain missing permission, not something actively blocking you. Here's the real gotcha: **invoking a model through an inference profile requires permission on both the inference-profile ARN *and* the underlying foundation-model ARN in every region that profile can route to** — not just one or the other. AWS's own documentation calls this out explicitly. If whatever identity you're using only has permission scoped to the plain model ARN (or, depending on what's attached to it, doesn't cover inference profiles at all), this is exactly the error you'll get.
+
+The fix is an Allow statement covering both ARN shapes — for Nova Pro's US profile specifically, that means the profile ARN plus the foundation-model ARN in each of the three regions it spans:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowNovaProViaInferenceProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel*",
+      "Resource": [
+        "arn:aws:bedrock:<region>:<account-id>:inference-profile/us.amazon.nova-pro-v1:0",
+        "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
+        "arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-pro-v1:0",
+        "arn:aws:bedrock:us-west-2::foundation-model/amazon.nova-pro-v1:0"
+      ]
+    }
+  ]
+}
+```
+
+Attach this as an inline policy to whichever identity you're using (the role from Method A, or — if Method B's default managed policy doesn't already cover inference profiles — the IAM user behind your Bedrock API key).
+
+While you're troubleshooting this, worth also knowing: **`bedrock:Converse` is not a real, separate IAM action**, even though it looks like it should be one. If you tried adding it to a policy and IAM's console rejected it, that's correct behavior, not a bug on your end — the Converse API is authorized under the same `bedrock:InvokeModel` action as the older Invoke API. `bedrock:InvokeModel*` (the wildcard form used above) covers both `InvokeModel` and `InvokeModelWithResponseStream` in one line.
 
 ### Reflect
 
@@ -290,12 +327,7 @@ The mechanism is an IAM condition key called **`aws:SourceVpce`**. AWS automatic
        {
          "Sid": "DenyBedrockUnlessViaMyEndpoint",
          "Effect": "Deny",
-         "Action": [
-           "bedrock:InvokeModel",
-           "bedrock:InvokeModelWithResponseStream",
-           "bedrock:Converse",
-           "bedrock:ConverseStream"
-         ],
+         "Action": "bedrock:InvokeModel*",
          "Resource": "*",
          "Condition": {
            "StringNotEquals": {
@@ -307,7 +339,7 @@ The mechanism is an IAM condition key called **`aws:SourceVpce`**. AWS automatic
    }
    ```
 
-   Notice the `Resource` here is `*`, not scoped down to Nova Pro specifically — deliberately, since a Deny like this is meant to be a blanket network guardrail, not a fine-grained permission. You don't want a gap where some other model ARN quietly slips through ungoverned.
+   Notice the `Resource` here is `*`, not scoped down to Nova Pro specifically — deliberately, since a Deny like this is meant to be a blanket network guardrail, not a fine-grained permission. You don't want a gap where some other model ARN quietly slips through ungoverned. And `bedrock:InvokeModel*` (a wildcard, not a literal action name) is intentional too — it covers both `InvokeModel` and `InvokeModelWithResponseStream` in one line, including whatever's authorizing your Converse calls under the hood, without needing a separate `bedrock:Converse` action (which — as you may have discovered back in Part 6 — isn't actually a real, distinct IAM action at all).
 
 4. Retest from your own laptop, outside the VPC — the exact same request and credentials that worked back in Part 7. It should now fail with an access-denied-style error.
 5. Retest from the lab instance. It should still succeed — that traffic carries the matching `aws:SourceVpce` context, so the Deny's condition doesn't trigger.
