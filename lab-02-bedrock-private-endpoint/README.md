@@ -224,12 +224,16 @@ Before you lock anything down, prove to yourself that what you have right now re
 
 ### Step 2 — Create the interface VPC endpoint
 
+Before you create the endpoint itself, add one security group rule to get out of the way of a very common gotcha: create (or pick) a security group for the endpoint and add an inbound rule allowing **HTTPS (443) from anywhere (0.0.0.0/0)**. Yes, "anywhere" — that's intentional, and less alarming than it sounds: this endpoint's network interface only gets a *private* IP with no route in from the public internet, so "anywhere" in practice only ever means "anywhere inside this VPC that can already route to it." Opening it this wide sidesteps a fiddly failure mode: if you instead try to scope the source down to "the instance's security group" and get the reference wrong — or, easy to do by accident, leave the endpoint on the VPC's **default** security group — connections will silently time out. AWS's default security group only allows traffic between resources that are *also* members of that same default security group, which your lab instance isn't, so it doesn't cover this at all.
+
 1. In the VPC console, go to **Endpoints → Create endpoint**.
 2. Service category: AWS services. Search for and select the **Interface** endpoint for `bedrock-runtime` in your region.
 3. VPC: your lab VPC. Subnet: the lab's public subnet (it's the only one you have).
 4. **Enable DNS name** (private DNS) — this is the setting that makes the standard `bedrock-runtime.<region>.amazonaws.com` hostname resolve to the endpoint's private IP instead of a public one, so you don't have to change your Bruno request's URL at all.
-5. Security group: create (or reuse) one that allows inbound **HTTPS (443)** from your instance's security group.
+5. Security group: attach the one you just set up above (443 from anywhere), not the VPC's default security group.
 6. Create the endpoint and wait for it to become available.
+
+If you'd rather scope the inbound rule down more tightly (source = your instance's security group specifically, instead of 0.0.0.0/0) once you've got the basic flow working, that's a reasonable thing to circle back and try — just know it's the part most likely to leave you stuck with a silent timeout if the reference doesn't line up exactly right.
 
 ### Step 3 — Verify DNS is actually resolving privately
 
