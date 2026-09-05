@@ -178,12 +178,12 @@ If you built your request URL using Nova Pro's plain Model ID (the one you recor
 
 Before you assume you botched the request or the auth — you didn't. This is Bedrock telling you something specific and real: some models (Nova Pro among them) can't be invoked on-demand by their plain model ID at all. They can only be invoked through an **inference profile** — a Bedrock construct that (among other things) can route your request across multiple regions for capacity. Bedrock won't guess which profile you mean, so it makes you say so explicitly.
 
-Head into the Bedrock console and look for **Cross-Region inference** in the left navigation. Find the profile that includes Nova Pro, and note its ID (or ARN). Then swap that value into your request URL in place of the plain model ID you were using before, and resend.
+Head into the Bedrock console and look for **Inference profiles** in the left navigation (under the "Infer" section). On the **System-defined** tab, filter/search for a profile whose model is Nova Pro, and grab its **Inference profile ID** (or ARN). Then swap that value into your request URL in place of the plain model ID you were using before, and resend.
 
 <details>
 <summary><strong>Not finding it / want a sanity check on the format?</strong></summary>
 
-Inference profile IDs generally follow a `<region-group>.<original-model-id>` pattern — for example `us.amazon.nova-pro-v1:0` for the US region group. The exact prefix depends on which region group covers where you deployed, so confirm the real value against what the console actually shows you rather than assuming the `us.` prefix is universal.
+Inference profile IDs generally follow a `<region-group>.<original-model-id>` pattern — for example `us.amazon.nova-pro-v1:0` for the US region group (this one specifically routes across `us-east-1`, `us-east-2`, and `us-west-2`). The exact prefix depends on which region group covers where you deployed, so confirm the real value against what the console actually shows you rather than assuming the `us.` prefix is universal.
 
 </details>
 
