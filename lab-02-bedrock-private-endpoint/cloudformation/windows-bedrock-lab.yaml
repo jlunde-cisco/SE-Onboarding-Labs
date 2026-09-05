@@ -1,11 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Lab 02 scaffolding - Provisions a new VPC with a public subnet + IGW, a
+  Lab 02 scaffolding - Provisions a new VPC with a public subnet + IGW and a
   Windows Server 2016 EC2 instance reachable via RDP from the deploying
-  engineer's own IP, an interface VPC endpoint (PrivateLink) for the Bedrock
-  Runtime service, and an instance role scoped to invoke the Amazon Nova
-  Lite model. Engineers RDP into the box, install Postman/Bruno, and call
-  Bedrock Runtime over the private endpoint instead of the public internet.
+  engineer's own IP. Bruno is silently installed via UserData at first
+  boot, so it's ready to go by the time the engineer RDPs in. Engineers
+  build out the Bedrock Runtime PrivateLink endpoint and IAM permissions
+  themselves as part of the lab.
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -31,9 +31,9 @@ Metadata:
           - RootVolumeSizeGiB
           - LatestWindowsAmiId
       - Label:
-          default: Bedrock
+          default: Tooling
         Parameters:
-          - NovaLiteModelId
+          - BrunoVersion
     ParameterLabels:
       VpcName:
         default: VPC Name tag
@@ -102,10 +102,13 @@ Parameters:
       2016 AMI - no need to hunt down an AMI ID by hand.
     Default: /aws/service/ami-windows-latest/Windows_Server-2016-English-Full-Base
 
-  NovaLiteModelId:
+  BrunoVersion:
     Type: String
-    Description: Bedrock foundation model ID the instance role is allowed to invoke.
-    Default: amazon.nova-lite-v1:0
+    Description: >
+      Bruno version to silently install via UserData at first boot (pinned,
+      not "latest", so every engineer gets the same build). Check
+      https://github.com/usebruno/bruno/releases for newer versions.
+    Default: "4.1.0"
 
 Resources:
   # ---------------------------------------------------------------------
@@ -173,7 +176,7 @@ Resources:
   RDPSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow RDP from the deploying engineer's IP only
+      GroupDescription: Allow RDP from the IP of the deploying engineer
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -184,69 +187,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-rdp-sg
-
-  BedrockEndpointSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow HTTPS from the Windows box to the Bedrock Runtime interface endpoint
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourceSecurityGroupId: !Ref RDPSecurityGroup
-          Description: HTTPS from the lab instance
-      Tags:
-        - Key: Name
-          Value: !Sub ${VpcName}-bedrock-endpoint-sg
-
-  # ---------------------------------------------------------------------
-  # Bedrock Runtime PrivateLink endpoint
-  # ---------------------------------------------------------------------
-  BedrockRuntimeVPCEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref VPC
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.bedrock-runtime
-      VpcEndpointType: Interface
-      PrivateDnsEnabled: true
-      SubnetIds:
-        - !Ref PublicSubnet
-      SecurityGroupIds:
-        - !Ref BedrockEndpointSecurityGroup
-
-  # ---------------------------------------------------------------------
-  # IAM role for the instance - scoped to invoking Nova Lite only
-  # ---------------------------------------------------------------------
-  EC2InstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${VpcName}-bedrock-lab-role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: InvokeNovaLite
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${NovaLiteModelId}
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-
-  EC2InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref EC2InstanceRole
 
   # ---------------------------------------------------------------------
   # Windows Server 2016 instance
@@ -260,7 +200,6 @@ Resources:
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds:
         - !Ref RDPSecurityGroup
-      IamInstanceProfile: !Ref EC2InstanceProfile
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -269,6 +208,52 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${VpcName}-windows-lab
+      # Runs once at first boot via EC2Launch (Windows Server 2016 uses
+      # EC2Launch v1, not EC2Launch v2). Silently installs Bruno so it's
+      # ready to go by the time the engineer RDPs in. Progress/errors are
+      # logged to C:\lab-bootstrap.log, and a marker file
+      # (C:\lab-bootstrap-complete.txt or -failed.txt) is dropped on the
+      # desktop's parent drive so success/failure can be confirmed at a
+      # glance without digging through the log.
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          $ErrorActionPreference = "Stop"
+          Start-Transcript -Path "C:\lab-bootstrap.log" -Append
+
+          try {
+            # Windows Server 2016's .NET Framework defaults to SSL3/TLS1.0
+            # for outbound HTTPS, which GitHub (and most modern hosts)
+            # reject - causes "Could not create SSL/TLS secure channel."
+            # Force TLS 1.2 before making any web requests.
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+            # NOTE: BrunoVersion below is substituted by CloudFormation's
+            # Fn::Sub (with the literal parameter value, e.g. 4.1.0)
+            # before this script is ever written to the instance - by the
+            # time PowerShell parses it, it's plain text, not a variable.
+            $msiUrl  = "https://github.com/usebruno/bruno/releases/download/v${BrunoVersion}/bruno_${BrunoVersion}_x64_win.msi"
+            $msiPath = "$env:TEMP\bruno-installer.msi"
+
+            Write-Output "Downloading Bruno ${BrunoVersion} from $msiUrl"
+            Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
+
+            Write-Output "Installing Bruno silently"
+            $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /quiet /norestart /L*v `"$env:TEMP\bruno-msi.log`"" -Wait -NoNewWindow -PassThru
+            if ($proc.ExitCode -ne 0) {
+              throw "msiexec exited with code $($proc.ExitCode)"
+            }
+
+            Write-Output "Bruno ${BrunoVersion} installed successfully"
+            Set-Content -Path "C:\lab-bootstrap-complete.txt" -Value "Bruno ${BrunoVersion} installed at $(Get-Date)"
+          }
+          catch {
+            Write-Output "Bootstrap FAILED: $_"
+            Set-Content -Path "C:\lab-bootstrap-failed.txt" -Value "$_"
+          }
+
+          Stop-Transcript
+          </powershell>
 
 Outputs:
   VpcId:
@@ -286,11 +271,3 @@ Outputs:
   InstancePublicIp:
     Description: Public IP address - RDP to this
     Value: !GetAtt WindowsInstance.PublicIp
-
-  BedrockRuntimeEndpointId:
-    Description: VPC Endpoint ID for Bedrock Runtime (PrivateLink)
-    Value: !Ref BedrockRuntimeVPCEndpoint
-
-  IamRoleName:
-    Description: IAM role attached to the instance (scoped to InvokeModel on Nova Lite)
-    Value: !Ref EC2InstanceRole
