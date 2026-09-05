@@ -206,7 +206,23 @@ You've now authenticated the same API call two different ways. Before moving on,
 
 Right now, your call to `bedrock-runtime.<region>.amazonaws.com` travels out through the instance's internet gateway, across the public internet, to AWS. This section walks you through forcing that same call over **AWS PrivateLink** instead — so it never leaves AWS's network. This part is more heavily guided than the rest of the lab; the concepts (interface endpoints, private DNS, security group egress) are worth understanding, not rediscovering from scratch.
 
-### Step 1 — Create the interface VPC endpoint
+### Step 1 — Confirm today's baseline: this is genuinely public
+
+Before you lock anything down, prove to yourself that what you have right now really is public — not "public in some theoretical sense," but reachable from literally anywhere with valid credentials.
+
+1. On the Windows instance, open a command prompt and run:
+
+   ```
+   ping bedrock-runtime.<region>.amazonaws.com
+   ```
+
+   Swap in whatever region you deployed into. Don't be thrown if the actual echo requests time out — plenty of AWS service endpoints don't answer ICMP at all. The part you actually care about is the first line, which shows the IP address the hostname resolved to (something like `Pinging bedrock-runtime.us-east-2.amazonaws.com [x.x.x.x]`) — that's an ordinary public AWS IP, nothing PrivateLink-related yet.
+
+2. Now switch to a machine that has nothing to do with this lab's VPC at all — your actual laptop, wherever you normally work. Open Bruno (or Postman, or whatever's installed there) and send the exact same authenticated Nova Pro request you built in Parts 5 and 6 — same URL, same body, same credentials.
+
+   It should just work, no differently than it did from the lab instance. No VPC, no security group, no proximity to AWS infrastructure of any kind required — just valid credentials and an internet connection. That's what a "public endpoint" actually means, and it's exactly what the rest of this section changes — but only for traffic leaving your lab instance, as you'll see at the end.
+
+### Step 2 — Create the interface VPC endpoint
 
 1. In the VPC console, go to **Endpoints → Create endpoint**.
 2. Service category: AWS services. Search for and select the **Interface** endpoint for `bedrock-runtime` in your region.
@@ -215,7 +231,7 @@ Right now, your call to `bedrock-runtime.<region>.amazonaws.com` travels out thr
 5. Security group: create (or reuse) one that allows inbound **HTTPS (443)** from your instance's security group.
 6. Create the endpoint and wait for it to become available.
 
-### Step 2 — Verify DNS is actually resolving privately
+### Step 3 — Verify DNS is actually resolving privately
 
 Back on the Windows instance, open a command prompt and run:
 
@@ -223,9 +239,9 @@ Back on the Windows instance, open a command prompt and run:
 nslookup bedrock-runtime.<region>.amazonaws.com
 ```
 
-Before the endpoint existed, this would've returned a public AWS IP. Now, with private DNS enabled, it should resolve to a private address inside your VPC's CIDR range. If it's still showing a public IP, double check the endpoint's "Enable DNS name" setting and give DNS a minute to catch up.
+Compare this against what the `ping` in Step 1 showed you. Now, with private DNS enabled, it should resolve to a private address inside your VPC's CIDR range instead of the public IP you saw before. If it's still showing a public IP, double check the endpoint's "Enable DNS name" setting and give DNS a minute to catch up.
 
-### Step 3 — Actually force the private path
+### Step 4 — Actually force the private path
 
 Here's the part that's easy to miss: **just creating the endpoint doesn't stop the instance from also being able to reach the internet directly.** Private DNS changes what address the hostname resolves to, but your instance's security group still has a default "allow all outbound" rule — so traffic *could* still leave over the internet through some other path. To genuinely guarantee this traffic stays private, you need to close that door:
 
@@ -235,9 +251,11 @@ Here's the part that's easy to miss: **just creating the endpoint doesn't stop t
 
 Expect this to also block other outbound HTTPS traffic from the box (general web browsing, Windows Update, etc.) — that's expected and fine for the lab; you can always revert the rule if something breaks and you need internet access back.
 
-### Step 4 — Re-test
+### Step 5 — Re-test
 
 Send your Nova Pro request from Bruno again, unchanged. It should still succeed — but now via PrivateLink instead of the internet.
+
+If you go back to your own laptop from Step 1 and send that same request again from there, it'll still work too, completely unaffected. That's worth sitting with for a second: you haven't made Bedrock itself private, or even this specific model private. You've only forced *this one VPC's* path to Bedrock over PrivateLink. Anyone else with valid credentials, anywhere else on the internet, still reaches the exact same public endpoint you did back in Step 1.
 
 ### Reflect
 
