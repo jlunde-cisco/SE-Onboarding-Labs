@@ -3,7 +3,8 @@
 A series of hands-on labs for Solutions Engineers joining the team. Each lab is
 self-contained, runs against a real AWS account, and builds on the one before it.
 The focus is Amazon Bedrock — how the models work, how to call them from code, and
-how to run that traffic on infrastructure you'd actually ship.
+how to run that traffic on infrastructure you'd actually ship. Lab 03 then connects
+that account to Cisco AI Defense for AI asset discovery.
 
 ## How these labs work
 
@@ -44,6 +45,16 @@ key to restrict the credentials to that endpoint.
 Requires Lab 01 (you'll reuse the Nova Pro Model ID). The private-endpoint
 section is more heavily guided — it's genuinely advanced material.
 
+### [Lab 03 — Onboarding an AWS Account into AI Defense](lab-03-ai-defense-asset-inventory/README.md)
+
+A short overview lab: connect an AWS account to a Cisco AI Defense tenant with the
+Cloud integration, deploy the AI Defense IAM roles via CloudFormation, then create
+an AI resource (a Bedrock model call or a knowledge base) and watch it show up in
+AI Defense's **AI Inventory**. Follows along with Jason's onboarding video.
+
+~30–45 minutes. Uses the AWS account from Lab 01. Needs Administrator access to an
+AI Defense tenant (coordinate with jlunde@cisco.com).
+
 ## Repo layout
 
 ```
@@ -51,4 +62,6 @@ lab-01-bedrock-intro/          Lab 01 — student-facing README
 lab-02-bedrock-private-endpoint/
   README.md                    Lab 02 — student-facing README
   cloudformation/              CloudFormation template + maintainer notes
+lab-03-ai-defense-asset-inventory/
+  README.md                    Lab 03 — student-facing README
 ```
