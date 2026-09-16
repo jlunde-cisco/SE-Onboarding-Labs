@@ -2,9 +2,10 @@
 
 A series of hands-on labs for Solutions Engineers joining the team. Each lab is
 self-contained, runs against a real AWS account, and builds on the one before it.
-The focus is Amazon Bedrock — how the models work, how to call them from code, and
-how to run that traffic on infrastructure you'd actually ship. Lab 03 then connects
-that account to Cisco AI Defense for AI asset discovery.
+The focus is managed model services — how the models work, how to call them from
+code, and how to run that traffic on infrastructure you'd actually ship. Most of
+it is Amazon Bedrock; Lab 03 connects that account to Cisco AI Defense, and Lab 04
+digs into system prompts as a guardrailing technique.
 
 ## How these labs work
 
@@ -55,6 +56,17 @@ AI Defense's **AI Inventory**. Follows along with Jason's onboarding video.
 ~30–45 minutes. Uses the AWS account from Lab 01. Needs Administrator access to an
 AI Defense tenant (coordinate with jlunde@cisco.com).
 
+### [Lab 04 — System Prompts as Guardrails](lab-04-system-prompt-guardrails/README.md)
+
+Run a set of test prompts — scope drift, prompt injection, instruction leakage —
+against a model with no system prompt, then again with a well-defined one, and
+compare what actually gets through. Then grow that system prompt from a tight
+one-paragraph version to a verbose one and watch the input token count climb
+for the exact same message, to see why a guardrail's *size* has a real cost
+against your context window and your bill on every single turn.
+
+~45–60 minutes. Builds on Lab 01 (Bedrock Playground, token counts).
+
 ## Repo layout
 
 ```
@@ -64,4 +76,6 @@ lab-02-bedrock-private-endpoint/
   cloudformation/              CloudFormation template + maintainer notes
 lab-03-ai-defense-asset-inventory/
   README.md                    Lab 03 — student-facing README
+lab-04-system-prompt-guardrails/
+  README.md                    Lab 04 — student-facing README
 ```
