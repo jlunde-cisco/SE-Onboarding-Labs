@@ -48,13 +48,11 @@ Before you can deploy anything, you need an EC2 key pair. The lab's CloudFormati
 The lab infrastructure is defined as a CloudFormation template. Deploy it through the **CloudFormation console** (not the CLI):
 
 1. Go to **CloudFormation → Create stack → With new resources (standard)**.
-2. For the template source, choose to specify it via **Amazon S3 URL** and paste in:
+2. For the template source, download the file below, save it, and then upload a template file.
 
    ```
    https://raw.githubusercontent.com/jlunde-cisco/SE-Onboarding-Labs/main/lab-02-bedrock-private-endpoint/cloudformation/windows-bedrock-lab.yaml
    ```
-
-   (The field says "S3 URL" but any public HTTPS URL serving the template works — this is a raw GitHub link.)
 3. Give the stack a name (again — your Cisco username somewhere in it).
 4. Fill in the parameters. The two you *must* set correctly:
    - **VpcName** — use your Cisco username (e.g. `jsmith-bedrock-lab`). This flows through to the names of everything else the stack creates.
