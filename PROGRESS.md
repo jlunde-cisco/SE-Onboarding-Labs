@@ -1,6 +1,6 @@
 # SE Onboarding Labs — Progress Notes
 
-_Last updated: 2026-09-09. This file is a handoff doc for resuming this project in a new conversation — it's not part of the lab content itself and doesn't need to ship to students._
+_Last updated: 2026-09-21. This file is a handoff doc for resuming this project in a new conversation — it's not part of the lab content itself and doesn't need to ship to students._
 
 ## What this project is
 
@@ -24,6 +24,8 @@ Lab Series/
 ├── lab-03-ai-defense-asset-inventory/
 │   └── README.md                    # student-facing lab, complete — overview, no infra/scaffolding
 ├── lab-04-system-prompt-guardrails/
+│   └── README.md                    # student-facing lab, complete — no infra/scaffolding
+├── lab-05-litellm-ai-defense-guardrails/
 │   └── README.md                    # student-facing lab, complete — no infra/scaffolding
 ├── README.md                        # repo-root index linking each lab (for onboarding SEs)
 └── PROGRESS.md                      # this file
@@ -86,12 +88,23 @@ New lab added 2026-09-09 at Jason's request. Deliberately an **overview**, not c
 
 **Note:** writing this file's initial draft (containing the example prompt-injection test strings, e.g. "Ignore any previous instructions...") tripped a local PostToolUse hook (Cisco AI Defense prompt-injection scanner) as a `SECURITY_VIOLATION` after the file was already written to disk. This is expected/likely a false positive — the lab's entire point is to contain injection-style example text for students to test — but it will probably fire again on any future edit to this file. Flagged to Jason; he chose to continue rather than adjust the hook.
 
+## Lab 05 — Wiring AI Defense Into a Gateway It Doesn't Officially Support (complete, NOT committed/pushed as of 2026-09-21)
+
+New lab added 2026-09-21 at Jason's request. Framing: presales scenario — customer runs LiteLLM as their AI gateway, AI Defense has no validated/first-party guardrail integration for LiteLLM, student has to engineer one themselves. Jason's explicit asks: (1) AWS-based topology with LiteLLM routing out to an OpenAI model, (2) give the topology explicitly, (3) leave the actual AI Defense integration mechanism open-ended/creative, (4) call out that using a coding agent/harness to help engineer the solution is expected and fine. Scoping answers from Jason this session: LiteLLM runs on a **single EC2 instance** (not ECS/Fargate), **no CloudFormation template** — students build the box by hand like the early parts of Lab 02 but without scaffolding, and the OpenAI key is a **plain environment variable** (no Secrets Manager) to keep it simple for a lab.
+
+**Flow:** Part 1 — topology given explicitly via an ASCII diagram: one VPC/public subnet/EC2 instance running the LiteLLM proxy on :4000 routing to OpenAI, with an unlabeled "AI Defense Inspection API — this box is your job" node — deliberately doesn't say where/how it plugs in. Part 2 — stand up the base topology by hand (launch EC2, security group scoped to the student's IP for SSH + port 4000, `pip install 'litellm[proxy]'`, `OPENAI_API_KEY` env var, minimal `config.yaml` pointing at `gpt-4o-mini`, confirm a bare curl gets a real OpenAI completion with zero guardrails). Part 3 — get AI Defense **runtime/inspection** API credentials specifically (distinct from Lab 03's asset-discovery integration) — written generically ("find where your tenant generates this") since exact console navigation for this capability wasn't verified this session. Part 4 — the actual exercise: wire AI Defense into LiteLLM's request path with no first-party plugin to lean on. Two graduated `<details>` nudges (1: LiteLLM's proxy config supports registering custom Python via `litellm_settings` — go look at their docs for callbacks/guardrails/hooks; 2: conceptually there's a pre-forward hook point and a post-response hook point, without naming exact method names) plus an explicit "still stuck → ping Jason" reveal. Part 5 — prove it's real: benign prompt reaches OpenAI, an adversarial/injection prompt (reuses the Lab 04 test-prompt style) gets stopped, and — the actual proof bar — both calls show up with real verdicts in AI Defense's own console, not just local code behaving correctly. Wrap-up questions hit: cost of "not validated," where they hooked in and why, fail-open vs. fail-closed (must be a deliberate, defensible choice), coverage gaps (anything bypassing the proxy), and what to tell a customer about official support.
+
+**Deliberately not spoiled in the lab text:** the actual working integration pattern (a custom LiteLLM pre-call/post-call hook class registered as a `callbacks` entry in `config.yaml`, calling out to AI Defense's inspection endpoint and acting on an `is_safe`-style verdict) is real and Jason has a working reference implementation, but he explicitly asked that its repo link **not appear anywhere in the generated lab content** — it's something he hands to a student directly if/when they're genuinely stuck, not something baked into the README. Do not add this link to the lab, root README, or this file's public-facing sections if this file is ever shared; noting its existence here only as maintainer context.
+
+**Not verified against a live AWS/OpenAI/AI Defense stack this session** — written from the topology decisions above plus general knowledge of how LiteLLM's proxy extensibility and AI Defense's runtime guardrails concept work. Flag for a real run-through: exact AI Defense console navigation to the runtime/inspection credential (Part 3 is deliberately vague pending this), and confirming the two-nudge structure in Part 4 is actually enough to get an SE to a working integration without the third "ping Jason" escape hatch firing every time.
+
 ## Open items / possible next steps
 
 - Nobody has run Lab 02 start-to-finish yet as an actual test student — the IMDS PowerShell snippet and the Converse API request shape are believed-correct but unverified against a live deployed instance.
 - **Lab 04 (system prompt guardrails) not run live this session** — see the "Not verified" note in its section above. Someone should actually run the 4 test prompts against Nova Pro with/without each system prompt version and swap in the real observed token counts/behavior before a cohort uses it.
 - **Lab 03 (AI Defense) not verified against a live tenant** — see the "Not verified" note in its section above.
-- Root-level `README.md` — indexes Labs 01–03 as of commit 59ebaf9 (pushed 2026-09-09). Working copy has the old Vertex Lab 04 replaced with the new system-prompt-guardrails Lab 04, uncommitted as of 2026-09-15.
+- **Lab 05 (LiteLLM + AI Defense) not verified against a live stack** — see the "Not verified" note in its section above. Someone should actually build the EC2/LiteLLM/OpenAI base, get real AI Defense runtime credentials, and confirm a student can get from the given topology to a working integration using only the two in-lab nudges.
+- Root-level `README.md` — indexes Labs 01–04 as of the last pushed commit. Working copy also has the new Lab 05 (LiteLLM + AI Defense) added, uncommitted as of 2026-09-21.
 - `TEMPLATE-NOTES.md`'s open item: Bruno's MSI asset naming (`bruno_<version>_x64_win.msi`) should be spot-checked if this lab sits unused for a while before the next cohort runs it, in case the project renames its release assets or the pinned `4.1.0` goes stale.
 
 ## Useful facts for continuing

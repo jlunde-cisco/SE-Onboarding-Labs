@@ -4,8 +4,10 @@ A series of hands-on labs for Solutions Engineers joining the team. Each lab is
 self-contained, runs against a real AWS account, and builds on the one before it.
 The focus is managed model services — how the models work, how to call them from
 code, and how to run that traffic on infrastructure you'd actually ship. Most of
-it is Amazon Bedrock; Lab 03 connects that account to Cisco AI Defense, and Lab 04
-digs into system prompts as a guardrailing technique.
+it is Amazon Bedrock; Lab 03 connects that account to Cisco AI Defense, Lab 04
+digs into system prompts as a guardrailing technique, and Lab 05 has you
+engineer AI Defense runtime guardrails onto a gateway (LiteLLM) that doesn't
+officially support them yet.
 
 ## How these labs work
 
@@ -67,6 +69,19 @@ against your context window and your bill on every single turn.
 
 ~45–60 minutes. Builds on Lab 01 (Bedrock Playground, token counts).
 
+### [Lab 05 — Wiring AI Defense Into a Gateway It Doesn't Officially Support](lab-05-litellm-ai-defense-guardrails/README.md)
+
+A POV-style scenario: the customer runs **LiteLLM** as their AI gateway, and
+Cisco AI Defense isn't a validated guardrail integration for it. Stand up a
+LiteLLM proxy on EC2 routing to a real OpenAI model, then figure out —
+yourself, with an AI coding assistant if you want one — how to get AI
+Defense's runtime guardrails actually inspecting and blocking traffic
+through that gateway. The base topology is given; the integration itself
+is the exercise. The most open-ended lab in the series.
+
+~2–3 hours. Uses AWS + an OpenAI API key + an AI Defense tenant with
+runtime guardrail access.
+
 ## Repo layout
 
 ```
@@ -78,4 +93,6 @@ lab-03-ai-defense-asset-inventory/
   README.md                    Lab 03 — student-facing README
 lab-04-system-prompt-guardrails/
   README.md                    Lab 04 — student-facing README
+lab-05-litellm-ai-defense-guardrails/
+  README.md                    Lab 05 — student-facing README
 ```
