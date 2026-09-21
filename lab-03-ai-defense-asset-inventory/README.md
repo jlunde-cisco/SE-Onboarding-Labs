@@ -59,8 +59,8 @@ In Lab 02 *you* held credentials (an IMDS-sourced role, or a Bedrock API key) an
 
 In the **AI Defense** console:
 
-1. Go to **Administration → Integrations**, and open the **Cloud** tab.
-2. Click **Add integration**.
+1. Go to **Administration → Integrations**
+2. Click **Add** within the AWS Amazon Web Services tile
 3. Fill in the **Connection Configuration**:
    - **Display name** — something you'll recognize, e.g. `<your-name>-lab3-aws`.
    - **Scope** — choose **Account** for this lab. (Organization scope onboards every account under an AWS Org OU at once via a StackSet — powerful, but not what you want against your personal lab account.)
