@@ -28,7 +28,7 @@ Lab Series/
 ├── lab-05-litellm-ai-defense-guardrails/
 │   └── README.md                    # student-facing lab, complete — no infra/scaffolding
 ├── lab-06-agentic-identity/
-│   ├── README.md                    # student-facing lab, complete
+│   ├── README.md                    # student-facing lab, complete — original step-by-step (hand-held) guide
 │   └── palantir-mcp-server/         # server.py, requirements.txt, .env.example (imported unchanged)
 ├── README.md                        # repo-root index linking each lab (for onboarding SEs)
 └── PROGRESS.md                      # this file
@@ -101,15 +101,19 @@ New lab added 2026-09-21 at Jason's request. Framing: presales scenario — cust
 
 **Not verified against a live AWS/OpenAI/AI Defense stack this session** — written from the topology decisions above plus general knowledge of how LiteLLM's proxy extensibility and AI Defense's runtime guardrails concept work. Flag for a real run-through: exact AI Defense console navigation to the runtime/inspection credential (Part 3 is deliberately vague pending this), and confirming the two-nudge structure in Part 4 is actually enough to get an SE to a working integration without the third "ping Jason" escape hatch firing every time.
 
-## Lab 06 — Agentic Identity (complete, NOT committed/pushed as of 2026-10-02)
+## Lab 06 — Agentic Identity (complete, committed + pushed 2026-10-02, commit 2764641)
 
-Imported 2026-10-02 from Jason's other-account repo `jlunde-pg/agentic-identity-lab` (single "Initial commit" 1f39cd0; the repo itself was a POC called "The Palantír"). Code copied unchanged into `lab-06-agentic-identity/palantir-mcp-server/` (`server.py`, `requirements.txt`, `.env.example`, `.gitignore` that excludes `.env`). The original README was a click-by-click setup guide; it was rewritten into the house-style lab README (scenario, learning goals, prerequisites, 7 parts, `<details>` reveals, cleanup, wrap-up).
+Imported 2026-10-02 from Jason's other-account repo `jlunde-pg/agentic-identity-lab` (single "Initial commit" 1f39cd0; the repo was a POC called "The Palantír"). Code is in `lab-06-agentic-identity/palantir-mcp-server/` (`server.py`, `requirements.txt`, `.env.example`, `.gitignore` that excludes `.env`), unchanged from the source.
 
-**Content:** MCP server (FastMCP, SSE) where users authenticate via Auth0, the JWT `permissions[]` claim maps to Google Drive folder IDs, and `read_file` re-verifies the file's parent folder. Test users Frodo (Hobbit: shire+shared, 5 files) and Gandalf (Wizard: all three, 8 files). Added to the lab text: a "find where authorization is decided" exercise, an attempt-to-break-it-as-Frodo step, JWT inspection (delegation vs. impersonation), and a security-audit part listing the POC gaps found in `server.py` (JWT signature never verified, single global in-memory session, user input interpolated into the Drive `q` query, no token refresh, no audit log). The code was not modified to fix these; they're lab material.
+**Deliberate exception to the house style:** the lab README is the original **click-by-click** setup guide, not a high-level exploratory rewrite. I first rewrote it in house style (commit 8afdfe8), but Jason asked to go back to the original because people need their hands held through this lab (commit 2764641). Only edit made to the original: step 1 clones `SE-Onboarding-Labs` and `cd`s into `lab-06-agentic-identity/palantir-mcp-server` instead of the placeholder `YOUR_USERNAME/palantir-mcp-server`. It has no `<details>` reveals or wrap-up questions. Don't re-add them unless asked.
 
-**Not verified:** nothing was run this session. Setup steps come from the original README. Needs a real run-through (Auth0 + Google consent-screen test-user step, Claude Desktop `mcp-remote` config). Also confirm with Jason that Lab 06 is meant to be ordered after Lab 05 and that its being independent of the AWS account is fine.
+**Content:** MCP server (FastMCP, SSE). Users authenticate via Auth0, the JWT `permissions[]` claim maps to Google Drive folder IDs, and `read_file` re-verifies the file's parent folder. Test users Frodo (Hobbit: shire+shared, 5 files) and Gandalf (Wizard: all three, 8 files). Setup covers Auth0 (API, permissions, roles, users, Regular Web App, callback `http://localhost:3001/callback`), Google Drive (OAuth creds, callback `http://localhost:3002/callback`, three folders), `.env`, running the server, and the Claude Desktop `mcp-remote` config.
 
-**Note:** the local AI Defense PostToolUse hook flagged the new README as Prompt Injection after it was written (the "break it as Frodo" section describes social-engineering attempts). Same false-positive class as Lab 04.
+**Known POC gaps in `server.py`** (the original README lists some under "Production Considerations"; code not modified): JWT signature never verified, single global in-memory session, user input interpolated into the Drive `q` query in `search_files`, no token refresh, no audit log.
+
+**Not verified:** nothing was run this session. Needs a real run-through (Auth0 and Google consent-screen test-user setup, Claude Desktop `mcp-remote` config). Time estimate is not stated in the lab.
+
+**Note:** the local AI Defense PostToolUse hook flagged the (since-replaced) rewritten README as Prompt Injection after it was written. Same false-positive class as Lab 04.
 
 ## Open items / possible next steps
 

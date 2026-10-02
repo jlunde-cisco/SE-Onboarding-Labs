@@ -85,18 +85,15 @@ runtime guardrail access.
 
 ### [Lab 06 — Agentic Identity: Scoping an AI Agent to the User Behind It](lab-06-agentic-identity/README.md)
 
-A customer wants an AI agent with access to Google Drive, and their security
-team wants to know why that doesn't hand every user the whole drive. Run a
-small MCP server (The Palantír) that gives the agent a non-human identity
-bound to the signed-in user: Auth0 issues a token with that user's
-permissions, and the server only touches the Drive folders those permissions
-allow. Watch the same agent return different files for two users, try to
-talk it past the boundary, then audit the proof-of-concept code for what
-production would need.
+A proof-of-concept MCP server (The Palantír) that gives an AI agent a
+non-human identity bound to the signed-in user. Auth0 issues a token carrying
+that user's permissions, and the server only reads the Google Drive folders
+those permissions allow. You set up Auth0 and Google Drive, connect the server
+to Claude Desktop, and watch the same agent return different files for two
+users (Frodo and Gandalf). This one is fully guided, step by step.
 
-~2–3 hours, mostly identity-provider setup. Needs a free Auth0 tenant, a
-Google Cloud project, Python, Node.js, and Claude Desktop. Independent of
-the AWS account used in earlier labs.
+Needs a free Auth0 tenant, a Google Cloud project, Python, Node.js, and Claude
+Desktop. Independent of the AWS account used in earlier labs.
 
 ## Repo layout
 
