@@ -1,6 +1,6 @@
 # SE Onboarding Labs — Progress Notes
 
-_Last updated: 2026-09-21. This file is a handoff doc for resuming this project in a new conversation — it's not part of the lab content itself and doesn't need to ship to students._
+_Last updated: 2026-10-02. This file is a handoff doc for resuming this project in a new conversation — it's not part of the lab content itself and doesn't need to ship to students._
 
 ## What this project is
 
@@ -27,6 +27,9 @@ Lab Series/
 │   └── README.md                    # student-facing lab, complete — no infra/scaffolding
 ├── lab-05-litellm-ai-defense-guardrails/
 │   └── README.md                    # student-facing lab, complete — no infra/scaffolding
+├── lab-06-agentic-identity/
+│   ├── README.md                    # student-facing lab, complete
+│   └── palantir-mcp-server/         # server.py, requirements.txt, .env.example (imported unchanged)
 ├── README.md                        # repo-root index linking each lab (for onboarding SEs)
 └── PROGRESS.md                      # this file
 ```
@@ -97,6 +100,16 @@ New lab added 2026-09-21 at Jason's request. Framing: presales scenario — cust
 **Deliberately not spoiled in the lab text:** the actual working integration pattern (a custom LiteLLM pre-call/post-call hook class registered as a `callbacks` entry in `config.yaml`, calling out to AI Defense's inspection endpoint and acting on an `is_safe`-style verdict) is real and Jason has a working reference implementation, but he explicitly asked that its repo link **not appear anywhere in the generated lab content** — it's something he hands to a student directly if/when they're genuinely stuck, not something baked into the README. Do not add this link to the lab, root README, or this file's public-facing sections if this file is ever shared; noting its existence here only as maintainer context.
 
 **Not verified against a live AWS/OpenAI/AI Defense stack this session** — written from the topology decisions above plus general knowledge of how LiteLLM's proxy extensibility and AI Defense's runtime guardrails concept work. Flag for a real run-through: exact AI Defense console navigation to the runtime/inspection credential (Part 3 is deliberately vague pending this), and confirming the two-nudge structure in Part 4 is actually enough to get an SE to a working integration without the third "ping Jason" escape hatch firing every time.
+
+## Lab 06 — Agentic Identity (complete, NOT committed/pushed as of 2026-10-02)
+
+Imported 2026-10-02 from Jason's other-account repo `jlunde-pg/agentic-identity-lab` (single "Initial commit" 1f39cd0; the repo itself was a POC called "The Palantír"). Code copied unchanged into `lab-06-agentic-identity/palantir-mcp-server/` (`server.py`, `requirements.txt`, `.env.example`, `.gitignore` that excludes `.env`). The original README was a click-by-click setup guide; it was rewritten into the house-style lab README (scenario, learning goals, prerequisites, 7 parts, `<details>` reveals, cleanup, wrap-up).
+
+**Content:** MCP server (FastMCP, SSE) where users authenticate via Auth0, the JWT `permissions[]` claim maps to Google Drive folder IDs, and `read_file` re-verifies the file's parent folder. Test users Frodo (Hobbit: shire+shared, 5 files) and Gandalf (Wizard: all three, 8 files). Added to the lab text: a "find where authorization is decided" exercise, an attempt-to-break-it-as-Frodo step, JWT inspection (delegation vs. impersonation), and a security-audit part listing the POC gaps found in `server.py` (JWT signature never verified, single global in-memory session, user input interpolated into the Drive `q` query, no token refresh, no audit log). The code was not modified to fix these; they're lab material.
+
+**Not verified:** nothing was run this session. Setup steps come from the original README. Needs a real run-through (Auth0 + Google consent-screen test-user step, Claude Desktop `mcp-remote` config). Also confirm with Jason that Lab 06 is meant to be ordered after Lab 05 and that its being independent of the AWS account is fine.
+
+**Note:** the local AI Defense PostToolUse hook flagged the new README as Prompt Injection after it was written (the "break it as Frodo" section describes social-engineering attempts). Same false-positive class as Lab 04.
 
 ## Open items / possible next steps
 

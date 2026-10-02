@@ -7,7 +7,8 @@ code, and how to run that traffic on infrastructure you'd actually ship. Most of
 it is Amazon Bedrock; Lab 03 connects that account to Cisco AI Defense, Lab 04
 digs into system prompts as a guardrailing technique, and Lab 05 has you
 engineer AI Defense runtime guardrails onto a gateway (LiteLLM) that doesn't
-officially support them yet.
+officially support them yet, and Lab 06 steps outside AWS to show how an AI
+agent's access gets scoped to the identity of the user it's acting for.
 
 ## How these labs work
 
@@ -82,6 +83,21 @@ is the exercise. The most open-ended lab in the series.
 ~2–3 hours. Uses AWS + an OpenAI API key + an AI Defense tenant with
 runtime guardrail access.
 
+### [Lab 06 — Agentic Identity: Scoping an AI Agent to the User Behind It](lab-06-agentic-identity/README.md)
+
+A customer wants an AI agent with access to Google Drive, and their security
+team wants to know why that doesn't hand every user the whole drive. Run a
+small MCP server (The Palantír) that gives the agent a non-human identity
+bound to the signed-in user: Auth0 issues a token with that user's
+permissions, and the server only touches the Drive folders those permissions
+allow. Watch the same agent return different files for two users, try to
+talk it past the boundary, then audit the proof-of-concept code for what
+production would need.
+
+~2–3 hours, mostly identity-provider setup. Needs a free Auth0 tenant, a
+Google Cloud project, Python, Node.js, and Claude Desktop. Independent of
+the AWS account used in earlier labs.
+
 ## Repo layout
 
 ```
@@ -95,4 +111,7 @@ lab-04-system-prompt-guardrails/
   README.md                    Lab 04 — student-facing README
 lab-05-litellm-ai-defense-guardrails/
   README.md                    Lab 05 — student-facing README
+lab-06-agentic-identity/
+  README.md                    Lab 06 — student-facing README
+  palantir-mcp-server/         MCP server code, requirements, .env.example
 ```
