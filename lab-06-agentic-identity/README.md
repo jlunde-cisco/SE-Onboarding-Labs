@@ -1,302 +1,234 @@
-# Lab 06 — Agentic Identity: Scoping an AI Agent to the User Behind It
+# 🔮 The Palantír
 
-## The scenario
+**Non-Human Identity with Per-User Permission Scoping for AI Agents**
 
-A customer is rolling out an AI agent that can search and read files in
-their company Google Drive. Their security team has one question: **"If
-this agent has access to Drive, doesn't everyone who talks to it get
-access to everything?"**
+A proof-of-concept MCP server demonstrating how to scope an AI agent's file access to a user's permission boundaries using OAuth 2.0 delegated authorization, Auth0 RBAC, and Google Drive.
 
-With a naive build, yes. The agent holds one broad credential, so it's a
-skeleton key to the whole drive, and the only thing standing between a
-user and the CEO's folder is whether the model feels like being polite
-about it. This lab walks through the pattern that fixes that: the agent
-gets a **non-human identity (NHI)** that is bound to the *user* it's
-acting for, and every file access is checked against that user's
-permissions, enforced in code on the server and not in the prompt.
+> *The Palantír sees only what its user is permitted to see.*
 
-You'll run a small MCP server (**The Palantír**) that does this with Auth0
-(identity and RBAC) and Google Drive (the files), connect it to Claude
-Desktop, and watch the same agent return different results for two
-different users.
+---
 
-## What you'll learn
+## The Problem
 
-By the end of this lab you'll be able to:
+When an AI agent acts on behalf of a user, it needs a **non-human identity (NHI)** that is constrained to that user's permissions. Without proper scoping, a single agent becomes a skeleton key to all organizational data.
 
-- Explain what a non-human identity is for an AI agent, and why "the agent
-  has a service account" is not an answer to the authorization question
-- Distinguish **authentication** (who are you), **authorization** (what
-  may you touch), and **delegation** (the agent acting on your behalf)
-- Read an OAuth 2.0 access token and find the claims that carry a user's
-  permissions
-- Explain why enforcement has to live in the tool server and not in the
-  model's instructions
-- Name what a proof-of-concept like this skips that production needs
+This lab demonstrates the correct pattern: **the agent authenticates users through an identity provider, receives a token containing only that user's permissions, and uses those permissions to constrain which resources it can access.**
 
-## Prerequisites
-
-- Python 3.11+ and Node.js (for the `mcp-remote` bridge)
-- [Claude Desktop](https://claude.ai/download)
-- A free [Auth0](https://auth0.com) tenant
-- A Google account and a Google Cloud project you can enable the Drive API
-  in
-- Comfort in a terminal and with a text editor
-
-~2–3 hours, most of it identity-provider setup. Independent of the AWS labs
-earlier in the series. It uses Claude Desktop rather than Bedrock, so you
-don't need the Lab 01 account. If you've done Lab 04, the idea that
-"instructions in a prompt aren't a security boundary" is the same idea
-this lab fixes properly.
-
-## Part 1 — The Architecture (given)
+## Architecture
 
 ```
 ┌─────────────┐     ┌───────────────────────┐     ┌──────────────┐
-│   Claude    │────▶│  Palantír MCP Server  │────▶│    Auth0     │
-│   Desktop   │◀────│  (Python · FastMCP)   │◀────│    (IdP)     │
+│   Claude     │────▶│  Palantír MCP Server   │────▶│    Auth0     │
+│   Desktop    │◀────│  (Python · FastMCP)    │◀────│    (IdP)     │
 └─────────────┘     │                       │     └──────────────┘
                     │  Session:             │
                     │  • user identity      │     ┌──────────────┐
-                    │  • auth0 permissions  │────▶│ Google Drive │
-                    │  • google credentials │◀────│   (Files)    │
+                    │  • auth0 permissions  │────▶│ Google Drive  │
+                    │  • google credentials │◀────│    (Files)    │
                     └───────────────────────┘     └──────────────┘
 ```
 
-The server exposes tools to the agent: `login`, `connect_google_drive`,
-`whoami`, `list_my_files`, `search_files`, `read_file`, and `logout`. The
-design hinges on one split:
+**The key insight:** Authorization comes from Auth0 (what can this user access?), not from Google Drive. The agent's Drive token is broad, but the MCP server only queries folders the user's Auth0 permissions allow.
 
-- **Auth0 decides what the user is allowed to see.** It issues a JWT with a
-  `permissions[]` claim based on the user's role.
-- **Google Drive stores the files.** The Drive token the server holds is
-  broad, so it could read everything.
-- **The server is the policy enforcement point.** It maps permissions to
-  folders and only ever queries folders the user's token allows.
+## Demo: Same Agent, Different Users, Different Access
 
-The permission model you'll build:
+### Frodo (Hobbit Role) → 5 files
+```
+📂 Shire Files (read:shire-files)
+  📄 shire-map.txt
+  📄 ring-bearer-journal.txt
+  📄 second-breakfast.txt
+📂 Shared Fellowship (read:shared-files)
+  📄 council-of-elrond.txt
+  📄 fellowship-roster.txt
+❌ Mordor Files → INVISIBLE
+```
 
-| Auth0 permission    | Drive folder            | Contents                  |
-|---------------------|-------------------------|---------------------------|
-| `read:shire-files`  | Shire Files             | Hobbit homeland docs      |
-| `read:mordor-files` | Mordor Files            | Enemy intelligence        |
-| `read:shared-files` | Shared Fellowship       | Fellowship-wide docs      |
+### Gandalf (Wizard Role) → 8 files
+```
+📂 Shire Files (read:shire-files)
+  📄 shire-map.txt
+  📄 ring-bearer-journal.txt
+  📄 second-breakfast.txt
+📂 Mordor Files (read:mordor-files)
+  📄 mordor-intel.txt
+  📄 orc-deployments.txt
+  📄 mount-doom-route.txt
+📂 Shared Fellowship (read:shared-files)
+  📄 council-of-elrond.txt
+  📄 fellowship-roster.txt
+```
 
-| Role   | Test user | Permissions                                               |
-|--------|-----------|-----------------------------------------------------------|
-| Hobbit | Frodo     | `read:shire-files`, `read:shared-files`                   |
-| Wizard | Gandalf   | `read:shire-files`, `read:mordor-files`, `read:shared-files` |
+Same agent. Same Google Drive. **Auth0 JWT permissions determine what the agent can see.**
 
-Read `palantir-mcp-server/server.py` before you run anything. It's about
-400 lines, and finding where authorization is actually decided is the first
-exercise.
+## How It Works
 
-<details>
-<summary><strong>Where does the authorization decision actually happen?</strong></summary>
+1. **User calls `login`** → MCP server opens browser for Auth0 authentication
+2. **Auth0 returns a JWT** with a `permissions[]` claim based on the user's role
+3. **User calls `connect_google_drive`** → OAuth consent for Drive read access
+4. **User calls `search_files` or `list_my_files`** → MCP server maps Auth0 permissions to folder IDs and only queries authorized folders
+5. **User calls `read_file`** → MCP server verifies the file's parent folder is in the user's authorized set before returning content
 
-Look at `SessionStore.get_accessible_folders()`, which turns the user's
-Auth0 permissions into a list of folder IDs, and at how `list_my_files`,
-`search_files`, and `read_file` use it. Search and list only ever query
-those folders. `read_file` goes one step further and fetches the file's
-`parents` from Drive and refuses unless one of them is in the allowed set.
+## Permission Model
 
-That last check matters. Without it, a user (or an injected prompt) who
-learns or guesses a file ID could ask for it directly, and the broad Drive
-token would happily return it.
+| Auth0 Permission    | Google Drive Folder     | Description              |
+|---------------------|-------------------------|--------------------------|
+| `read:shire-files`  | Shire Files folder      | Hobbit homeland docs     |
+| `read:mordor-files` | Mordor Files folder     | Enemy intelligence       |
+| `read:shared-files` | Shared Fellowship folder| Fellowship-wide docs     |
 
-</details>
+| Role   | User    | Permissions                                              |
+|--------|---------|----------------------------------------------------------|
+| Hobbit | Frodo   | `read:shire-files`, `read:shared-files`                  |
+| Wizard | Gandalf | `read:shire-files`, `read:mordor-files`, `read:shared-files` |
 
-## Part 2 — Set Up Auth0
+## Setup
 
-Create the identity side. In an Auth0 tenant you'll need:
+### Prerequisites
 
-- An **API** (the resource the token is minted for), with RBAC enabled and
-  permissions added to the access token
-- The three permissions from the table above
-- Two **roles** (Hobbit, Wizard) holding the right permission sets
-- Two **users** (Frodo, Gandalf), each assigned a role
-- A **Regular Web Application** representing the MCP server as an OAuth
-  client, with `http://localhost:3001/callback` as an allowed callback URL
+- Python 3.11+
+- Node.js (for `mcp-remote` bridge)
+- [Auth0 account](https://auth0.com) (free tier)
+- [Google Cloud project](https://console.cloud.google.com) with Drive API enabled
+- [Claude Desktop](https://claude.ai/download)
 
-Record the tenant domain, API identifier (audience), and the application's
-client ID and secret. They go in your `.env` later.
+### 1. Clone and install
 
-Two toggles on the API are easy to miss and the lab silently breaks without
-them. Look for the ones about RBAC and about permissions appearing in the
-access token.
+```bash
+git clone https://github.com/jlunde-cisco/SE-Onboarding-Labs.git
+cd SE-Onboarding-Labs/lab-06-agentic-identity/palantir-mcp-server
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-<details>
-<summary><strong>I logged in but my permissions list is empty</strong></summary>
+### 2. Auth0 Setup
 
-The access token only carries a `permissions` claim if the API has **Enable
-RBAC** and **Add Permissions in the Access Token** both turned on, the user
-actually has a role assigned, and the token was requested for the right
-audience. Check all three, then log out and back in. An old token won't
-pick up the change.
+1. Create an Auth0 tenant
+2. **Create an API** called "The Palantir" with identifier `https://palantir.middle-earth.local`
+   - Enable RBAC
+   - Enable "Add Permissions in the Access Token"
+3. **Add permissions** to the API: `read:shire-files`, `read:mordor-files`, `read:shared-files`
+4. **Create roles:**
+   - Hobbit → `read:shire-files`, `read:shared-files`
+   - Wizard → all three permissions
+5. **Create users** and assign roles (e.g., Frodo → Hobbit, Gandalf → Wizard)
+6. **Create a Regular Web Application** ("Palantír MCP Agent")
+   - Note the Client ID and Client Secret
+   - Set Allowed Callback URLs: `http://localhost:3001/callback`
 
-</details>
+### 3. Google Drive Setup
 
-## Part 3 — Set Up Google Drive
+1. Create a Google Cloud project and enable the **Google Drive API**
+2. Create **OAuth 2.0 credentials** (Web application)
+   - Authorized redirect URI: `http://localhost:3002/callback`
+3. Create three folders in Google Drive with test files:
+   - `Shire Files/` — hobbit-related documents
+   - `Mordor Files/` — enemy intelligence
+   - `Shared Fellowship/` — fellowship-wide documents
+4. Note each folder's ID from the Drive URL
 
-- In a Google Cloud project, enable the **Google Drive API**
-- Create **OAuth 2.0 credentials** of type Web application, with
-  `http://localhost:3002/callback` as an authorized redirect URI
-- Create three Drive folders matching the table in Part 1 and put a few
-  small text files in each. Make the contents recognizable per folder, so
-  you can tell at a glance whether a leak happened.
-- Note each folder's ID (it's in the folder's URL)
+### 4. Configure environment
 
-If Google makes you configure an OAuth consent screen, add your own account
-as a test user.
+```bash
+cp .env.example .env
+```
 
-## Part 4 — Run the Server and Connect Claude Desktop
+Edit `.env` with your credentials:
 
-Work in `palantir-mcp-server/`. Make a virtual environment, install
-`requirements.txt`, copy `.env.example` to `.env`, and fill in everything
-you collected in Parts 2 and 3. Then start `server.py`.
+```
+AUTH0_DOMAIN=your-tenant.us.auth0.com
+AUTH0_CLIENT_ID=your_client_id
+AUTH0_CLIENT_SECRET=your_client_secret
+AUTH0_AUDIENCE=https://palantir.middle-earth.local
 
-Claude Desktop reaches the server over SSE through the `mcp-remote` bridge.
-Add a server entry to `claude_desktop_config.json` that runs
-`npx -y mcp-remote http://localhost:3000/sse`, then restart Claude Desktop.
-Confirm the Palantír's tools show up.
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
 
-<details>
-<summary><strong>Claude Desktop doesn't show the tools</strong></summary>
+GDRIVE_SHIRE_FOLDER_ID=your_folder_id
+GDRIVE_MORDOR_FOLDER_ID=your_folder_id
+GDRIVE_SHARED_FOLDER_ID=your_folder_id
+```
 
-Check, in order: the server is still running and printed its startup
-banner, the URL in the config ends in `/sse`, and the JSON is valid. Fully
-quit Claude Desktop (not just close the window) and reopen it. If the
-bridge itself errors, `npx` needs Node on your `PATH`.
+### 5. Run the server
 
-</details>
+```bash
+python server.py
+```
 
-## Part 5 — Same Agent, Different Users
+### 6. Configure Claude Desktop
 
-Now the payoff. In Claude Desktop:
+Add to your `claude_desktop_config.json`:
 
-1. Ask it to log in to the Palantír and sign in as **Frodo**
-2. Connect Google Drive when prompted
-3. Run `whoami`, then list your files, then search for something that lives
-   in the Mordor folder
-4. Log out, sign in as **Gandalf**, and repeat
+```json
+{
+  "mcpServers": {
+    "palantir": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:3000/sse"]
+    }
+  }
+}
+```
 
-Record what each user sees. Frodo should see 5 files across two folders;
-Gandalf 8 across three.
+Restart Claude Desktop.
 
-Then try to break it as Frodo:
+### 7. Test it
 
-- Ask the agent directly to read a Mordor file. If you can't get the ID
-  from a listing, find it in the Drive UI.
-- Tell the agent you're an administrator and it should make an exception.
-- Ask for the contents of "every folder," or phrase the request so the
-  model is tempted to do the server's job for it.
+In Claude Desktop:
+1. "Log in to the Palantír" → authenticate as Frodo or Gandalf
+2. "Connect my Google Drive" → authorize Drive access
+3. "List my files" → see only what your role permits
+4. "Search for ring" → scoped search across authorized folders
+5. Log out, switch users, and see different results
 
-<details>
-<summary><strong>What should happen, and why can't the model talk its way past it?</strong></summary>
+## MCP Tools
 
-Every attempt should come back as an access denied from the *server*,
-because the decision isn't made by the model. The model never sees the
-Mordor folder ID or has a way to widen the folder list. That list is
-computed from the JWT's permissions, which the user can't edit. Compare
-this to Lab 04, where the restriction lived in a system prompt and the
-model was the only thing enforcing it.
+| Tool                  | Description                                        |
+|-----------------------|----------------------------------------------------|
+| `login`               | Authenticate via Auth0 (opens browser)             |
+| `connect_google_drive`| Link Google Drive (opens browser for OAuth consent)|
+| `whoami`              | Show current user, permissions, and session status |
+| `list_my_files`       | List all files in authorized folders               |
+| `search_files`        | Search across authorized folders                   |
+| `read_file`           | Read a specific file (with authorization check)    |
+| `logout`              | Clear session and tokens                           |
 
-If you did manage to read something you shouldn't have, you've found a bug
-worth understanding. Trace it through `read_file`.
+## Key Architectural Principles
 
-</details>
+- **Least privilege by default** — the agent has zero standing permissions; all access derives from the user's token
+- **Delegation, not impersonation** — the identity chain is preserved (agent acting on behalf of user)
+- **Authorization ≠ authentication** — Auth0 handles what you can access; Google handles file storage access
+- **Short-lived, scoped tokens** — no long-lived API keys or shared secrets
+- **Defense in depth** — `read_file` verifies parent folder authorization even if a file ID is guessed
 
-## Part 6 — Look Inside the Token
+## Anti-Patterns This Avoids
 
-The server decodes the Auth0 access token to get permissions. Take one
-issued for Frodo and one for Gandalf and decode them (jwt.io works, or a
-few lines of Python), and compare the claims.
+- ❌ God-mode service accounts with app-layer filtering
+- ❌ Shared API keys across all users
+- ❌ Client-side only permission enforcement
+- ❌ Long-lived credentials or hardcoded secrets
 
-Answer for yourself:
+## Production Considerations
 
-- Which claim carries the permissions? What are `aud`, `sub`, and `exp`
-  telling you?
-- Who is the "subject" of the token, the human or the agent? What does that
-  mean for audit logs?
-- How long does the token live, and what does that imply if it leaks?
+This is a lab/POC. For production, you would want:
 
-<details>
-<summary><strong>Delegation vs. impersonation</strong></summary>
+- **Token refresh** — handle expired Google and Auth0 tokens
+- **Proper JWT verification** — validate Auth0 token signatures using JWKS
+- **Persistent session store** — Redis or database instead of in-memory
+- **Multi-user concurrency** — session isolation per concurrent user
+- **Dynamic permission mapping** — lookup folder mappings from a database instead of static config
+- **Audit logging** — log every file access with user identity and timestamp
 
-The agent isn't logging in as Frodo. It holds a token that says *Frodo
-authorized this client to act for him, with these permissions*. The user's
-identity is preserved through the chain, so a log entry can say "agent X
-read file Y on behalf of Frodo." Impersonation, where the agent just uses
-Frodo's password or a shared service account, loses that chain, and you
-can no longer tell what the agent did from what the human did.
+## Tech Stack
 
-</details>
+| Component         | Technology              | Cost                  |
+|-------------------|-------------------------|-----------------------|
+| Identity Provider | Auth0 (free tier)       | Free (7,500 users)    |
+| File Storage      | Google Drive API        | Free (15 GB)          |
+| Agent Runtime     | Python + MCP SDK        | Free (open source)    |
+| AI Client         | Claude Desktop          | Free (with Claude plan)|
 
-## Part 7 — Find the Gaps
+## License
 
-This is a proof of concept, and the code says so in several comments. Audit
-it as a security engineer would, then compare your list to the one in the
-wrap-up. Start with these questions:
-
-- What does `decode_auth0_token` verify? What could an attacker do with
-  that?
-- What happens if two people use the server at once?
-- What's the search path doing with the user-supplied `query` string?
-- What happens when a token expires?
-- What would an audit trail need that this doesn't produce?
-
-<details>
-<summary><strong>Hint: the three biggest issues</strong></summary>
-
-1. **The JWT signature is never verified.** `decode_auth0_token` passes
-   `verify_signature: False`. In this lab the token arrives straight from
-   Auth0 over TLS, so it's tolerable, but any production path must verify
-   the signature against Auth0's JWKS, plus `iss`, `aud`, and `exp`.
-2. **There's one global session.** `session` is a single in-memory object,
-   so a second concurrent user would collide with or inherit the first.
-   Real deployments need per-user sessions keyed to a verified identity.
-3. **User input is interpolated into a Drive query.** `search_files` builds
-   a `fullText contains '...'` clause from the raw query string, so a quote
-   in the input changes the query. The folder restriction still holds, but
-   it's the kind of injection to close.
-
-</details>
-
-## Cleanup
-
-- Stop the server and remove its entry from `claude_desktop_config.json`
-- Revoke the app's access in your Google account's security settings
-- Delete the Auth0 test users, API, and application (or the tenant), and
-  the Google Cloud OAuth credentials
-- Never commit `.env`. The bundled `.gitignore` excludes it, so keep it.
-
-## Wrap-Up
-
-Before you consider this lab done, make sure you can answer these:
-
-1. A customer asks "how do we stop the agent from showing people files they
-   shouldn't see?" Explain the pattern in this lab in two minutes, without
-   saying "the prompt tells it not to."
-2. What's the difference between authentication, authorization, and
-   delegation, and which system in this lab owns each?
-3. Why does `read_file` re-check the file's parent folder instead of
-   trusting that the ID came from an earlier listing?
-4. Which parts of this would you have to change before a customer could
-   run it for a thousand users?
-5. Where would a guardrail product like AI Defense add value on top of this?
-   Identity scoping controls *which* data the agent can reach. What
-   controls what the agent does with the data it's allowed to read?
-
-<details>
-<summary><strong>Production checklist (compare to your Part 7 list)</strong></summary>
-
-- Verify JWT signatures via JWKS, and validate `iss`, `aud`, and `exp`
-- Refresh expired Auth0 and Google tokens
-- Per-user session isolation, stored in Redis or a database, not in memory
-- Dynamic permission-to-resource mapping from a data store, not env vars
-- Escape or parameterize user input in Drive queries
-- Audit logging: user identity, tool, resource, and timestamp for every
-  access
-- Short-lived tokens and no long-lived shared secrets
-
-</details>
+MIT
