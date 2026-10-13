@@ -250,7 +250,7 @@ find it doing the same research a real SE would). Then build it.
 <details>
 <summary><strong>Nudge 1 — I don't even know where to start looking</strong></summary>
 
-LiteLLM's proxy has a `litellm_settings` section in its config file, and
+LiteLLM's proxy has a `litellm_params` section in its config file, and
 one of the things you can register there is a path to your own Python
 code. Search LiteLLM's docs/GitHub for how custom logic gets registered
 in that config, and what lifecycle events it can hook into for a request
